@@ -1,7 +1,7 @@
 /*****************************************************************************
  * dct.h: ppc transform and zigzag
  *****************************************************************************
- * Copyright (C) 2003-2018 x264 project
+ * Copyright (C) 2003-2019 x264 project
  *
  * Authors: Eric Petit <eric.petit@lapsus.org>
  *          Guillaume Poirier <gpoirier@mplayerhq.hu>
@@ -36,6 +36,8 @@ void x264_sub16x16_dct_altivec( int16_t dct[16][16], uint8_t *pix1, uint8_t *pix
 
 #define x264_add8x8_idct_dc_altivec x264_template(add8x8_idct_dc_altivec)
 void x264_add8x8_idct_dc_altivec( uint8_t *p_dst, int16_t dct[4] );
+#define x264_add16x16_idct_dc_altivec x264_template(add16x16_idct_dc_altivec)
+void x264_add16x16_idct_dc_altivec( uint8_t *p_dst, int16_t dct[16] );
 
 #define x264_add4x4_idct_altivec x264_template(add4x4_idct_altivec)
 void x264_add4x4_idct_altivec( uint8_t *p_dst, int16_t dct[16] );

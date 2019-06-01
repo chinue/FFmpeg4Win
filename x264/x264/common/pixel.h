@@ -1,7 +1,7 @@
 /*****************************************************************************
  * pixel.c: pixel metrics
  *****************************************************************************
- * Copyright (C) 2004-2018 x264 project
+ * Copyright (C) 2004-2019 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Fiona Glaser <fiona@x264.com>
@@ -156,22 +156,5 @@ float x264_pixel_ssim_wxh  ( x264_pixel_function_t *pf, pixel *pix1, intptr_t i_
                              int i_width, int i_height, void *buf, int *cnt );
 #define x264_field_vsad x264_template(field_vsad)
 int x264_field_vsad( x264_t *h, int mb_x, int mb_y );
-
-#if WZ_CAE
-#define x264_pixel_ssd_8 x264_template(pixel_ssd_8)
-uint64_t x264_pixel_ssd_8( x264_pixel_function_t *pf, pixel *pix1, intptr_t i_pix1, pixel *pix2, intptr_t i_pix2,
-                             int i_width, int i_height, float * h);
-#define x264_pixel_ssd_4 x264_template(pixel_ssd_4)
-uint64_t x264_pixel_ssd_4( x264_pixel_function_t *pf, pixel *pix1, intptr_t i_pix1, pixel *pix2, intptr_t i_pix2,
-                             int i_width, int i_height, int64_t * h);
-#define x264_pixel_ssim_wxh_min x264_template(pixel_ssim_wxh_min)
-float x264_pixel_ssim_wxh_min  ( x264_pixel_function_t *pf, pixel *pix1, intptr_t i_pix1, pixel *pix2, intptr_t i_pix2,
-                             int i_width, int i_height, void *buf, int *cnt, float * ssim);
-#define x264_pixel_ssim_4x4 x264_template(pixel_ssim_4x4)
-void x264_pixel_ssim_4x4( x264_pixel_function_t *pf,
-                           pixel *pix1, intptr_t stride1,
-                           pixel *pix2, intptr_t stride2,
-                           int width, int height, void *buf, float *min_ssim, float* ave_ssim );
-#endif  //WZ_CAE
 
 #endif

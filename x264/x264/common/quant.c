@@ -1,7 +1,7 @@
 /*****************************************************************************
  * quant.c: quantization and level-run
  *****************************************************************************
- * Copyright (C) 2005-2018 x264 project
+ * Copyright (C) 2005-2019 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Fiona Glaser <fiona@x264.com>
@@ -320,7 +320,7 @@ static void denoise_dct( dctcoef *dct, uint32_t *sum, udctcoef *offset, int size
  *  chroma: for the complete mb: if score < 7 -> null
  */
 
-static int ALWAYS_INLINE decimate_score_internal( dctcoef *dct, int i_max )
+static ALWAYS_INLINE int decimate_score_internal( dctcoef *dct, int i_max )
 {
     const uint8_t *ds_table = (i_max == 64) ? x264_decimate_table8 : x264_decimate_table4;
     int i_score = 0;
@@ -741,6 +741,7 @@ void x264_quant_init( x264_t *h, int cpu, x264_quant_function_t *pf )
         pf->quant_2x2_dc = x264_quant_2x2_dc_altivec;
         pf->quant_4x4_dc = x264_quant_4x4_dc_altivec;
         pf->quant_4x4 = x264_quant_4x4_altivec;
+        pf->quant_4x4x4 = x264_quant_4x4x4_altivec;
         pf->quant_8x8 = x264_quant_8x8_altivec;
 
         pf->dequant_4x4 = x264_dequant_4x4_altivec;

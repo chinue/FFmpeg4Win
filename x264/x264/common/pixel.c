@@ -1,7 +1,7 @@
 /*****************************************************************************
  * pixel.c: pixel metrics
  *****************************************************************************
- * Copyright (C) 2003-2018 x264 project
+ * Copyright (C) 2003-2019 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -147,58 +147,6 @@ uint64_t x264_pixel_ssd_wxh( x264_pixel_function_t *pf, pixel *pix1, intptr_t i_
 
     return i_ssd;
 }
-
-#if WZ_CAE
-uint64_t x264_pixel_ssd_8( x264_pixel_function_t *pf, pixel *pix1, intptr_t i_pix1,
-                             pixel *pix2, intptr_t i_pix2, int i_width, int i_height, float * h)
-{
-    int y;
-  
-  uint64_t value8,value40,value41,value42,value43;
-#define SSD(size) {value8 = pf->ssd[size]( pix1 + y*i_pix1 + x, i_pix1, \
-                        pix2 + y*i_pix2 + x, i_pix2 ); \
-           value40 = pf->ssd[PIXEL_4x4]( pix1 + y*i_pix1 + x, i_pix1, \
-                        pix2 + y*i_pix2 + x, i_pix2 ); \
-           value41 = pf->ssd[PIXEL_4x4]( pix1 + y*i_pix1 + x + 4, i_pix1, \
-                        pix2 + y*i_pix2 + x + 4, i_pix2 ); \
-           value42 = pf->ssd[PIXEL_4x4]( pix1 + (y + 4)*i_pix1 + x + 4, i_pix1, \
-                        pix2 + (y + 4)*i_pix2 + x + 4, i_pix2 ); \
-           value43 = pf->ssd[PIXEL_4x4]( pix1 + (y + 4)*i_pix1 + x + 4, i_pix1, \
-                        pix2 + (y + 4)*i_pix2 + x + 4, i_pix2 ); \
-                        *h = X264_MAX((sqrt(value8/64.0)+sqrt(X264_MAX4(value40,value41,value42,value43)/16.0))/2.0,*h);}
-    for( y = 0; y < i_height-7; y += 8 )
-    {
-        int x = 0;
-        for( ; x < i_width-7; x += 8 ){
-            SSD(PIXEL_8x8);
-        }
-    }
-  //printf("%lld,%lld,%lld,%lld,%lld=>%6.3f\n",value8,value40,value41,value42,value43,*h);
-#undef SSD
-
-    return 1;
-}
-
-uint64_t x264_pixel_ssd_4( x264_pixel_function_t *pf, pixel *pix1, intptr_t i_pix1,
-                             pixel *pix2, intptr_t i_pix2, int i_width, int i_height, int64_t * h)
-{
-    int y;
-  
-  int value;
-#define SSD(size) {value = pf->ssd[size]( pix1 + y*i_pix1 + x, i_pix1, \
-                          pix2 + y*i_pix2 + x, i_pix2 ); \
-                        *h = X264_MAX(value,*h);}
-    for( y = 0; y < i_height-4; y += 4 )
-    {
-        int x = 0;
-        for( ; x < i_width-4; x += 4 )
-            SSD(PIXEL_4x4);
-    }
-#undef SSD
-
-    return 1;
-}
-#endif  //WZ_CAE
 
 static void pixel_ssd_nv12_core( pixel *pixuv1, intptr_t stride1, pixel *pixuv2, intptr_t stride2,
                                  int width, int height, uint64_t *ssd_u, uint64_t *ssd_v )
@@ -736,87 +684,6 @@ static float ssim_end4( int sum0[5][4], int sum1[5][4], int width )
                            sum0[i][3] + sum0[i+1][3] + sum1[i][3] + sum1[i+1][3] );
     return ssim;
 }
-
-#if WZ_CAE
-float x264_pixel_ssim_wxh_min( x264_pixel_function_t *pf,
-                           pixel *pix1, intptr_t stride1,
-                           pixel *pix2, intptr_t stride2,
-                           int width, int height, void *buf, int *cnt, float *min_ssim )
-{
-    int z = 0;
-    float ssim = 0.0;
-    int (*sum0)[4] = buf;
-    int (*sum1)[4] = sum0 + (width >> 2) + 3;
-    width >>= 2;
-    height >>= 2;
-    for( int y = 1; y < height; y++ )
-    {
-        for( ; z <= y; z++ )
-        {
-            XCHG( void*, sum0, sum1 );
-            for( int x = 0; x < width; x+=2 )
-                pf->ssim_4x4x2_core( &pix1[4*(x+z*stride1)], stride1, &pix2[4*(x+z*stride2)], stride2, &sum0[x] );
-        }
-        for( int x = 0; x < width-1; x += 4 )
-        {
-            float value = pf->ssim_end4( sum0+x, sum1+x, X264_MIN(4,width-x-1) );
-			*min_ssim = X264_MIN(*min_ssim,value/(1.0*X264_MIN(4,width-x-1)));
-            ssim += value;
-        }
-    }
-    *cnt = (height-1) * (width-1);
-    return ssim;
-}
-static float ssim_end4x4( int s1, int s2, int ss, int s12 )
-{
-/* Maximum value for 10-bit is: ss*64 = (2^10-1)^2*16*4*64 = 4286582784, which will overflow in some cases.
- * s1*s1, s2*s2, and s1*s2 also obtain this value for edge cases: ((2^10-1)*16*4)^2 = 4286582784.
- * Maximum value for 9-bit is: ss*64 = (2^9-1)^2*16*4*64 = 1069551616, which will not overflow. */
-#if BIT_DEPTH > 9
-#define type float
-    static const float ssim_c1 = .01*.01*PIXEL_MAX*PIXEL_MAX*16;
-    static const float ssim_c2 = .03*.03*PIXEL_MAX*PIXEL_MAX*16*15;
-#else
-#define type int
-    static const int ssim_c1 = (int)(.01*.01*PIXEL_MAX*PIXEL_MAX*16 + .5);
-    static const int ssim_c2 = (int)(.03*.03*PIXEL_MAX*PIXEL_MAX*16*15 + .5);
-#endif
-    type fs1 = s1;
-    type fs2 = s2;
-    type fss = ss;
-    type fs12 = s12;
-    type vars = fss*16 - fs1*fs1 - fs2*fs2;
-    type covar = fs12*16 - fs1*fs2;
-    return (float)(2*fs1*fs2 + ssim_c1) * (float)(2*covar + ssim_c2)
-         / ((float)(fs1*fs1 + fs2*fs2 + ssim_c1) * (float)(vars + ssim_c2));
-#undef type
-}
-/* Calculate ssim by each 4x4 block, not 8x8 */
-void x264_pixel_ssim_4x4( x264_pixel_function_t *pf,
-                           pixel *pix1, intptr_t stride1,
-                           pixel *pix2, intptr_t stride2,
-                           int width, int height, void *buf, float *min_ssim, float* ave_ssim )
-{
-    float ssim = 0.0;
-    int (*sum0)[4] = buf;
-    width >>= 2;
-    height >>= 2;
-    for( int y = 0; y < height; y++ )
-    {
-        //calculate each 4x4 block, reuse ssim_4x4x2_core, get 2 ssim values a time
-        for( int x = 0; x < width; x+=2 ){
-            pf->ssim_4x4x2_core( &pix1[4*(x+y*stride1)], stride1, &pix2[4*(x+y*stride2)], stride2, &sum0[x] );
-            float value0 = ssim_end4x4(sum0[x][0], sum0[x][1], sum0[x][2], sum0[x][3]);
-            float value1 = ssim_end4x4(sum0[x+1][0], sum0[x+1][1], sum0[x+1][2], sum0[x+1][3]);
-            *min_ssim = X264_MIN(*min_ssim,value0);
-            *min_ssim = X264_MIN(*min_ssim,value1);
-            ssim += (value0 + value1);
-        }
-    }
-    *ave_ssim = ssim / (width * height);
-    return;
-}
-#endif
 
 float x264_pixel_ssim_wxh( x264_pixel_function_t *pf,
                            pixel *pix1, intptr_t stride1,

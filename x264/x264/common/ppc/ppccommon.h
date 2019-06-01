@@ -1,7 +1,7 @@
 /*****************************************************************************
  * ppccommon.h: ppc utility macros
  *****************************************************************************
- * Copyright (C) 2003-2018 x264 project
+ * Copyright (C) 2003-2019 x264 project
  *
  * Authors: Eric Petit <eric.petit@lapsus.org>
  *
@@ -146,19 +146,14 @@ typedef union {
 #define vec_s32_to_u16(v) vec_packsu( v, zero_s32v )
 
 /***********************************************************************
- * PREP_STORE##n: declares required vectors to store n bytes to a
- *                potentially unaligned address
  * VEC_STORE##n:  stores n bytes from vector v to address p
  **********************************************************************/
-#define PREP_STORE8                                                    \
-    vec_u8_t _tmp3v;                                                   \
-    vec_u8_t mask = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,  \
-                      0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F } \
-
-#define VEC_STORE8( v, p )           \
-    _tmp3v = vec_vsx_ld( 0, p );     \
-    v = vec_perm( v, _tmp3v, mask ); \
-    vec_vsx_st( v, 0, p )
+#ifndef __POWER9_VECTOR__
+#define VEC_STORE8( v, p ) \
+    vec_vsx_st( vec_xxpermdi( v, vec_vsx_ld( 0, p ), 1 ), 0, p )
+#else
+#define VEC_STORE8( v, p ) vec_xst_len( v, p, 8 )
+#endif
 
 /***********************************************************************
  * VEC_TRANSPOSE_8
@@ -303,4 +298,39 @@ p2 += i2;
         vec_st(vec_perm(_v, _e, _m), off + 15, _dst);      \
         vec_st(vec_perm(_e, _v, _m), off, _dst);           \
     } while( 0 )
+#endif
+
+#ifndef __POWER9_VECTOR__
+#define vec_absd( a, b ) vec_sub( vec_max( a, b ), vec_min( a, b ) )
+#endif
+
+// vec_xxpermdi is quite useful but some version of clang do not expose it
+#if !HAVE_VSX || (defined(__clang__) && __clang_major__ < 6)
+static const vec_u8_t xxpermdi0_perm = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+                                         0x06, 0x07, 0x10, 0x11, 0x12, 0x13,
+                                         0x14, 0x15, 0x16, 0x17 };
+static const vec_u8_t xxpermdi1_perm = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+                                         0x06, 0x07, 0x18, 0x19, 0x1A, 0x1B,
+                                         0x1C, 0x1D, 0x1E, 0x1F };
+static const vec_u8_t xxpermdi2_perm = { 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+                                         0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13,
+                                         0x14, 0x15, 0x16, 0x17 };
+static const vec_u8_t xxpermdi3_perm = { 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+                                         0x0E, 0x0F, 0x18, 0x19, 0x1A, 0x1B,
+                                         0x1C, 0x1D, 0x1E, 0x1F };
+#define xxpermdi(a, b, c) vec_perm(a, b, xxpermdi##c##_perm)
+#elif (defined(__GNUC__) && (__GNUC__ > 6 || (__GNUC__ == 6 && __GNUC_MINOR__ >= 3))) || \
+      (defined(__clang__) && __clang_major__ >= 7)
+#define xxpermdi(a, b, c) vec_xxpermdi(a, b, c)
+#endif
+
+// vec_xxpermdi has its endianness bias exposed in early gcc and clang
+#ifdef WORDS_BIGENDIAN
+#ifndef xxpermdi
+#define xxpermdi(a, b, c) vec_xxpermdi(a, b, c)
+#endif
+#else
+#ifndef xxpermdi
+#define xxpermdi(a, b, c) vec_xxpermdi(b, a, ((c >> 1) | (c & 1) << 1) ^ 3)
+#endif
 #endif

@@ -1,7 +1,7 @@
 /*****************************************************************************
  * macroblock.h: macroblock common functions
  *****************************************************************************
- * Copyright (C) 2005-2018 x264 project
+ * Copyright (C) 2005-2019 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -85,12 +85,7 @@ enum mb_class_e
     B_8x8           = 17,
     B_SKIP          = 18,
 
-#if WZ_CAE_MB_REENCODE || WZ_CAE_MODE
-    X264_MBTYPE_MAX = 19,
-    X264_MBTYPE_UNKNOWN = 255
-#else
     X264_MBTYPE_MAX = 19
-#endif
 };
 static const uint8_t x264_mb_type_fix[X264_MBTYPE_MAX] =
 {

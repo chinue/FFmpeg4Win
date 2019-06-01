@@ -1,7 +1,7 @@
 /*****************************************************************************
  * analyse.c: macroblock analysis
  *****************************************************************************
- * Copyright (C) 2003-2018 x264 project
+ * Copyright (C) 2003-2019 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -147,9 +147,6 @@ static int init_costs( x264_t *h, float *logs, int qp )
 
     int mv_range = h->param.analyse.i_mv_range;
     int lambda = x264_lambda_tab[qp];
-#if WZ_CAE_LAMBDA
-    lambda = X264_MAX((int)(lambda * h->mb.f_lambda_factor),1);
-#endif
     /* factor of 4 from qpel, 2 from sign, and 2 because mv can be opposite from mvp */
     CHECKED_MALLOC( h->cost_mv[qp], (4*4*mv_range + 1) * sizeof(uint16_t) );
     h->cost_mv[qp] += 2*4*mv_range;
@@ -211,9 +208,11 @@ void x264_analyse_free_costs( x264_t *h )
     {
         if( h->cost_mv[i] )
             x264_free( h->cost_mv[i] - 2*4*mv_range );
-        if( h->cost_mv_fpel[i][0] )
-            for( int j = 0; j < 4; j++ )
+        for( int j = 0; j < 4; j++ )
+        {
+            if( h->cost_mv_fpel[i][j] )
                 x264_free( h->cost_mv_fpel[i][j] - 2*mv_range );
+        }
     }
 }
 
@@ -258,25 +257,14 @@ static void mb_analyse_init_qp( x264_t *h, x264_mb_analysis_t *a, int qp )
     int effective_chroma_qp = h->chroma_qp_table[SPEC_QP(qp)] + X264_MAX( qp - QP_MAX_SPEC, 0 );
     a->i_lambda = x264_lambda_tab[qp];
     a->i_lambda2 = x264_lambda2_tab[qp];
-#if WZ_CAE_LAMBDA
-    a->i_lambda = X264_MAX((int)(a->i_lambda * h->mb.f_lambda_factor),1);
-    a->i_lambda2 = X264_MAX((int)(a->i_lambda2 * h->mb.f_lambda_factor),1);
-#endif
 
     h->mb.b_trellis = h->param.analyse.i_trellis > 1 && a->i_mbrd;
     if( h->param.analyse.i_trellis )
     {
-#if WZ_CAE_LAMBDA
-        h->mb.i_trellis_lambda2[0][0] = X264_MAX((int)(x264_trellis_lambda2_tab[0][qp] * h->mb.f_lambda_factor),1);
-        h->mb.i_trellis_lambda2[0][1] = X264_MAX((int)(x264_trellis_lambda2_tab[1][qp] * h->mb.f_lambda_factor),1);
-        h->mb.i_trellis_lambda2[1][0] = X264_MAX((int)(x264_trellis_lambda2_tab[0][effective_chroma_qp] * h->mb.f_lambda_factor),1);
-        h->mb.i_trellis_lambda2[1][1] = X264_MAX((int)(x264_trellis_lambda2_tab[1][effective_chroma_qp] * h->mb.f_lambda_factor),1);
-#else        
         h->mb.i_trellis_lambda2[0][0] = x264_trellis_lambda2_tab[0][qp];
         h->mb.i_trellis_lambda2[0][1] = x264_trellis_lambda2_tab[1][qp];
         h->mb.i_trellis_lambda2[1][0] = x264_trellis_lambda2_tab[0][effective_chroma_qp];
         h->mb.i_trellis_lambda2[1][1] = x264_trellis_lambda2_tab[1][effective_chroma_qp];
-#endif
     }
     h->mb.i_psy_rd_lambda = a->i_lambda;
     /* Adjusting chroma lambda based on QP offset hurts PSNR but improves visual quality. */
@@ -321,8 +309,8 @@ static void mb_analyse_init( x264_t *h, x264_mb_analysis_t *a, int qp )
     /* I: Intra part */
     a->i_satd_i16x16 =
     a->i_satd_i8x8   =
-    a->i_satd_i4x4   =
-    a->i_satd_chroma = COST_MAX;
+    a->i_satd_i4x4   = COST_MAX;
+    a->i_satd_chroma = CHROMA_FORMAT ? COST_MAX : 0;
 
     /* non-RD PCM decision is inaccurate (as is psy-rd), so don't do it.
      * PCM cost can overflow with high lambda2, so cap it at COST_MAX. */
@@ -570,7 +558,7 @@ static ALWAYS_INLINE const int8_t *predict_4x4_mode_available( int force_intra, 
 }
 
 /* For trellis=2, we need to do this for both sizes of DCT, for trellis=1 we only need to use it on the chosen mode. */
-static void inline psy_trellis_init( x264_t *h, int do_both_dct )
+static inline void psy_trellis_init( x264_t *h, int do_both_dct )
 {
     if( do_both_dct || h->mb.b_transform_8x8 )
         h->dctf.sub16x16_dct8( h->mb.pic.fenc_dct8, h->mb.pic.p_fenc[0], (pixel*)x264_zero );
@@ -1047,7 +1035,7 @@ static void intra_rd_refine( x264_t *h, x264_mb_analysis_t *a )
     }
 
     /* RD selection for chroma prediction */
-    if( !CHROMA444 )
+    if( CHROMA_FORMAT == CHROMA_420 || CHROMA_FORMAT == CHROMA_422 )
     {
         const int8_t *predict_mode = predict_chroma_mode_available( h->mb.i_neighbour_intra );
         if( predict_mode[1] >= 0 )
@@ -2860,13 +2848,7 @@ static inline void mb_analyse_qp_rd( x264_t *h, x264_mb_analysis_t *a )
         }
 
         h->mb.i_qp += direction;
-#if WZ_CAE
-        //for cae, only allow qp_rd to search in range above orig_qp-2
-        const int i_cae_qp_min = X264_MAX(h->param.rc.i_qp_min, orig_qp - 2);
-        while( h->mb.i_qp >= i_cae_qp_min && h->mb.i_qp <= SPEC_QP( h->param.rc.i_qp_max ) )
-#else
         while( h->mb.i_qp >= h->param.rc.i_qp_min && h->mb.i_qp <= SPEC_QP( h->param.rc.i_qp_max ) )
-#endif
         {
             if( h->mb.i_last_qp == h->mb.i_qp )
                 last_qp_tried = 1;
@@ -2925,17 +2907,12 @@ void x264_macroblock_analyse( x264_t *h )
 {
     x264_mb_analysis_t analysis;
     int i_cost = COST_MAX;
-#if WZ_CAE
-    if(!h->mb.b_cae_mb_retry){
-#endif
+
     h->mb.i_qp = x264_ratecontrol_mb_qp( h );
     /* If the QP of this MB is within 1 of the previous MB, code the same QP as the previous MB,
      * to lower the bit cost of the qp_delta.  Don't do this if QPRD is enabled. */
     if( h->param.rc.i_aq_mode && h->param.analyse.i_subpel_refine < 10 )
         h->mb.i_qp = abs(h->mb.i_qp - h->mb.i_last_qp) == 1 ? h->mb.i_last_qp : h->mb.i_qp;
-#if WZ_CAE
-    }
-#endif
 
     if( h->param.analyse.b_mb_info )
         h->fdec->effective_qp[h->mb.i_mb_xy] = h->mb.i_qp; /* Store the real analysis QP. */
@@ -3728,12 +3705,8 @@ skip_analysis:
 
     if( !analysis.i_mbrd )
         mb_analyse_transform( h );
-#if WZ_CAE
-    if( !h->mb.b_cae_mb_retry && analysis.i_mbrd == 3 && !IS_SKIP(h->mb.i_type) )
-    //if(0)
-#else
+
     if( analysis.i_mbrd == 3 && !IS_SKIP(h->mb.i_type) )
-#endif
         mb_analyse_qp_rd( h, &analysis );
 
     h->mb.b_trellis = h->param.analyse.i_trellis;

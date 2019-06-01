@@ -1,7 +1,7 @@
 /*****************************************************************************
  * cavlc.c: cavlc bitstream writing
  *****************************************************************************
- * Copyright (C) 2003-2018 x264 project
+ * Copyright (C) 2003-2019 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -292,7 +292,7 @@ static ALWAYS_INLINE void cavlc_macroblock_luma_residual( x264_t *h, int plane_c
 #if RDO_SKIP_BS
 static ALWAYS_INLINE void cavlc_partition_luma_residual( x264_t *h, int i8, int p )
 {
-    if( h->mb.b_transform_8x8 && h->mb.cache.non_zero_count[x264_scan8[i8*4]] )
+    if( h->mb.b_transform_8x8 && h->mb.cache.non_zero_count[x264_scan8[i8*4+p*16]] )
         h->zigzagf.interleave_8x8_cavlc( h->dct.luma4x4[i8*4+p*16], h->dct.luma8x8[i8+p*4],
                                          &h->mb.cache.non_zero_count[x264_scan8[i8*4+p*16]] );
 
@@ -489,7 +489,7 @@ void x264_macroblock_write_cavlc( x264_t *h )
     bs_t *s = &h->out.bs;
     const int i_mb_type = h->mb.i_type;
     int plane_count = CHROMA444 ? 3 : 1;
-    int chroma = !CHROMA444;
+    int chroma = CHROMA_FORMAT == CHROMA_420 || CHROMA_FORMAT == CHROMA_422;
 
 #if RDO_SKIP_BS
     s->i_bits_encoded = 0;

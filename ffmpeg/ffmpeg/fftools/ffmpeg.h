@@ -16,13 +16,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef WZ_FFMPEG
-#define WZ_FFMPEG   1
-#endif
-#ifndef WZ_SPEED_FFMPEG
-#define WZ_SPEED_FFMPEG   1
-#endif
-
 #ifndef FFTOOLS_FFMPEG_H
 #define FFTOOLS_FFMPEG_H
 
@@ -389,10 +382,6 @@ typedef struct InputStream {
     uint64_t nb_packets;
     // number of frames/samples retrieved from the decoder
     uint64_t frames_decoded;
-#if WZ_FFMPEG
-    uint64_t readpkt_size;
-    uint64_t readkey_number;
-#endif
     uint64_t samples_decoded;
 
     int64_t *dts_buffer;
@@ -495,6 +484,7 @@ typedef struct OutputStream {
     AVRational frame_aspect_ratio;
 
     /* forced key frames */
+    int64_t forced_kf_ref_pts;
     int64_t *forced_kf_pts;
     int forced_kf_count;
     int forced_kf_index;

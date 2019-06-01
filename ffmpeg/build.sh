@@ -7,7 +7,8 @@
 #ÅäÖÃ°²×°InstallÄ¿Â¼
 INSTALL=$PWD/output
 pkgconfig=output/lib/pkgconfig
-export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$PWD/../vmaf/$pkgconfig:$PWD/../fdk-aac/$pkgconfig:$PWD/../x264/$pkgconfig
+export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$PWD/../x264/$pkgconfig:$PWD/../dav1d/$pkgconfig
+echo $PKG_CONFIG_PATH
 rm -rf $INSTALL
 mkdir $INSTALL
 

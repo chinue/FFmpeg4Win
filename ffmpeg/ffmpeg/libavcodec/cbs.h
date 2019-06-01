@@ -48,6 +48,7 @@ struct CodedBitstreamType;
  * H.264 / AVC: nal_unit_type
  * H.265 / HEVC: nal_unit_type
  * MPEG-2: start code value (without prefix)
+ * VP9: unused, set to zero (every unit is a frame)
  */
 typedef uint32_t CodedBitstreamUnitType;
 
@@ -84,8 +85,9 @@ typedef struct CodedBitstreamUnit {
      */
     size_t   data_bit_padding;
     /**
-     * If data is reference counted, a reference to the buffer containing
-     * data.  Null if data is not reference counted.
+     * A reference to the buffer containing data.
+     *
+     * Must be set if data is not NULL.
      */
     AVBufferRef *data_ref;
 
@@ -130,8 +132,9 @@ typedef struct CodedBitstreamFragment {
      */
     size_t data_bit_padding;
     /**
-     * If data is reference counted, a reference to the buffer containing
-     * data.  Null if data is not reference counted.
+     * A reference to the buffer containing data.
+     *
+     * Must be set if data is not NULL.
      */
     AVBufferRef *data_ref;
 
@@ -142,10 +145,19 @@ typedef struct CodedBitstreamFragment {
      * and has not been decomposed.
      */
     int              nb_units;
+
     /**
-     * Pointer to an array of units of length nb_units.
+     * Number of allocated units.
      *
-     * Must be NULL if nb_units is zero.
+     * Must always be >= nb_units; designed for internal use by cbs.
+     */
+     int             nb_units_allocated;
+
+    /**
+     * Pointer to an array of units of length nb_units_allocated.
+     * Only the first nb_units are valid.
+     *
+     * Must be NULL if nb_units_allocated is zero.
      */
     CodedBitstreamUnit *units;
 } CodedBitstreamFragment;
@@ -228,6 +240,9 @@ void ff_cbs_close(CodedBitstreamContext **ctx);
  * This also updates the internal state, so will need to be called for
  * codecs with extradata to read parameter sets necessary for further
  * parsing even if the fragment itself is not desired.
+ *
+ * The fragment must have been zeroed or reset via ff_cbs_fragment_reset
+ * before use.
  */
 int ff_cbs_read_extradata(CodedBitstreamContext *ctx,
                           CodedBitstreamFragment *frag,
@@ -240,6 +255,9 @@ int ff_cbs_read_extradata(CodedBitstreamContext *ctx,
  * This also updates the internal state of the coded bitstream context
  * with any persistent data from the fragment which may be required to
  * read following fragments (e.g. parameter sets).
+ *
+ * The fragment must have been zeroed or reset via ff_cbs_fragment_reset
+ * before use.
  */
 int ff_cbs_read_packet(CodedBitstreamContext *ctx,
                        CodedBitstreamFragment *frag,
@@ -252,6 +270,9 @@ int ff_cbs_read_packet(CodedBitstreamContext *ctx,
  * This also updates the internal state of the coded bitstream context
  * with any persistent data from the fragment which may be required to
  * read following fragments (e.g. parameter sets).
+ *
+ * The fragment must have been zeroed or reset via ff_cbs_fragment_reset
+ * before use.
  */
 int ff_cbs_read(CodedBitstreamContext *ctx,
                 CodedBitstreamFragment *frag,
@@ -291,11 +312,18 @@ int ff_cbs_write_packet(CodedBitstreamContext *ctx,
 
 
 /**
- * Free all allocated memory in a fragment.
+ * Free the units contained in a fragment as well as the fragment's
+ * own data buffer, but not the units array itself.
  */
-void ff_cbs_fragment_uninit(CodedBitstreamContext *ctx,
+void ff_cbs_fragment_reset(CodedBitstreamContext *ctx,
                             CodedBitstreamFragment *frag);
 
+/**
+ * Free the units array of a fragment in addition to what
+ * ff_cbs_fragment_reset does.
+ */
+void ff_cbs_fragment_free(CodedBitstreamContext *ctx,
+                          CodedBitstreamFragment *frag);
 
 /**
  * Allocate a new internal content buffer of the given size in the unit.

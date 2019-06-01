@@ -1,7 +1,7 @@
 /*****************************************************************************
  * base.c: misc common functions (bit depth independent)
  *****************************************************************************
- * Copyright (C) 2003-2018 x264 project
+ * Copyright (C) 2003-2019 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -196,7 +196,7 @@ error:
 /****************************************************************************
  * x264_picture_init:
  ****************************************************************************/
-void x264_picture_init( x264_picture_t *pic )
+static void picture_init( x264_picture_t *pic )
 {
     memset( pic, 0, sizeof( x264_picture_t ) );
     pic->i_type = X264_TYPE_AUTO;
@@ -204,10 +204,15 @@ void x264_picture_init( x264_picture_t *pic )
     pic->i_pic_struct = PIC_STRUCT_AUTO;
 }
 
+void x264_picture_init( x264_picture_t *pic )
+{
+    x264_stack_align( picture_init, pic );
+}
+
 /****************************************************************************
  * x264_picture_alloc:
  ****************************************************************************/
-int x264_picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_height )
+static int picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_height )
 {
     typedef struct
     {
@@ -237,7 +242,7 @@ int x264_picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_heigh
     int csp = i_csp & X264_CSP_MASK;
     if( csp <= X264_CSP_NONE || csp >= X264_CSP_MAX || csp == X264_CSP_V210 )
         return -1;
-    x264_picture_init( pic );
+    picture_init( pic );
     pic->img.i_csp = i_csp;
     pic->img.i_plane = csp_tab[csp].planes;
     int depth_factor = i_csp & X264_CSP_HIGH_DEPTH ? 2 : 1;
@@ -259,10 +264,15 @@ int x264_picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_heigh
     return 0;
 }
 
+int x264_picture_alloc( x264_picture_t *pic, int i_csp, int i_width, int i_height )
+{
+    return x264_stack_align( picture_alloc, pic, i_csp, i_width, i_height );
+}
+
 /****************************************************************************
  * x264_picture_clean:
  ****************************************************************************/
-void x264_picture_clean( x264_picture_t *pic )
+static void picture_clean( x264_picture_t *pic )
 {
     x264_free( pic->img.plane[0] );
 
@@ -270,10 +280,15 @@ void x264_picture_clean( x264_picture_t *pic )
     memset( pic, 0, sizeof( x264_picture_t ) );
 }
 
+void x264_picture_clean( x264_picture_t *pic )
+{
+    x264_stack_align( picture_clean, pic );
+}
+
 /****************************************************************************
  * x264_param_default:
  ****************************************************************************/
-void x264_param_default( x264_param_t *param )
+static void param_default( x264_param_t *param )
 {
     /* */
     memset( param, 0, sizeof( x264_param_t ) );
@@ -414,17 +429,13 @@ void x264_param_default( x264_param_t *param )
     param->i_opencl_device = 0;
     param->opencl_device_id = NULL;
     param->psz_clbin_file = NULL;
-#if WZ_CAE
-    param->f_max_ssd = 1<<30;
-    param->f_min_ssd = 0.0;
-    param->f_min_ssim = 0.0;
-    param->f_min_psnr = 0.0;
-    param->f_max_ssd_avg = 256*256;
-#if WZ_CAE_FRAME_REENCODE
-    param->f_frame_maxssd = 1 << 30;
-    param->f_frame_minssd = 0;
-#endif
-#endif    
+    param->i_avcintra_class = 0;
+    param->i_avcintra_flavor = X264_AVCINTRA_FLAVOR_PANASONIC;
+}
+
+void x264_param_default( x264_param_t *param )
+{
+    x264_stack_align( param_default, param );
 }
 
 static int param_apply_preset( x264_param_t *param, const char *preset )
@@ -448,6 +459,7 @@ static int param_apply_preset( x264_param_t *param, const char *preset )
         param->analyse.i_subpel_refine = 0;
         param->rc.i_aq_mode = 0;
         param->analyse.b_mixed_references = 0;
+        param->analyse.i_trellis = 0;
         param->i_bframe_adaptive = X264_B_ADAPT_NONE;
         param->rc.b_mb_tree = 0;
         param->analyse.i_weighted_pred = X264_WEIGHTP_NONE;
@@ -550,22 +562,17 @@ static int param_apply_preset( x264_param_t *param, const char *preset )
 
 static int param_apply_tune( x264_param_t *param, const char *tune )
 {
-    char *tmp = x264_malloc( strlen( tune ) + 1 );
-    if( !tmp )
-        return -1;
-    tmp = strcpy( tmp, tune );
-    char *s = strtok( tmp, ",./-+" );
     int psy_tuning_used = 0;
-    while( s )
+    for( int len; tune += strspn( tune, ",./-+" ), (len = strcspn( tune, ",./-+" )); tune += len )
     {
-        if( !strncasecmp( s, "film", 4 ) )
+        if( len == 4 && !strncasecmp( tune, "film", 4 ) )
         {
             if( psy_tuning_used++ ) goto psy_failure;
             param->i_deblocking_filter_alphac0 = -1;
             param->i_deblocking_filter_beta = -1;
             param->analyse.f_psy_trellis = 0.15;
         }
-        else if( !strncasecmp( s, "animation", 9 ) )
+        else if( len == 9 && !strncasecmp( tune, "animation", 9 ) )
         {
             if( psy_tuning_used++ ) goto psy_failure;
             param->i_frame_reference = param->i_frame_reference > 1 ? param->i_frame_reference*2 : 1;
@@ -575,7 +582,7 @@ static int param_apply_tune( x264_param_t *param, const char *tune )
             param->rc.f_aq_strength = 0.6;
             param->i_bframe += 2;
         }
-        else if( !strncasecmp( s, "grain", 5 ) )
+        else if( len == 5 && !strncasecmp( tune, "grain", 5 ) )
         {
             if( psy_tuning_used++ ) goto psy_failure;
             param->i_deblocking_filter_alphac0 = -2;
@@ -589,7 +596,7 @@ static int param_apply_tune( x264_param_t *param, const char *tune )
             param->analyse.i_luma_deadzone[1] = 6;
             param->rc.f_qcompress = 0.8;
         }
-        else if( !strncasecmp( s, "stillimage", 10 ) )
+        else if( len == 10 && !strncasecmp( tune, "stillimage", 10 ) )
         {
             if( psy_tuning_used++ ) goto psy_failure;
             param->i_deblocking_filter_alphac0 = -3;
@@ -598,26 +605,26 @@ static int param_apply_tune( x264_param_t *param, const char *tune )
             param->analyse.f_psy_trellis = 0.7;
             param->rc.f_aq_strength = 1.2;
         }
-        else if( !strncasecmp( s, "psnr", 4 ) )
+        else if( len == 4 && !strncasecmp( tune, "psnr", 4 ) )
         {
             if( psy_tuning_used++ ) goto psy_failure;
             param->rc.i_aq_mode = X264_AQ_NONE;
             param->analyse.b_psy = 0;
         }
-        else if( !strncasecmp( s, "ssim", 4 ) )
+        else if( len == 4 && !strncasecmp( tune, "ssim", 4 ) )
         {
             if( psy_tuning_used++ ) goto psy_failure;
             param->rc.i_aq_mode = X264_AQ_AUTOVARIANCE;
             param->analyse.b_psy = 0;
         }
-        else if( !strncasecmp( s, "fastdecode", 10 ) )
+        else if( len == 10 && !strncasecmp( tune, "fastdecode", 10 ) )
         {
             param->b_deblocking_filter = 0;
             param->b_cabac = 0;
             param->analyse.b_weighted_bipred = 0;
             param->analyse.i_weighted_pred = X264_WEIGHTP_NONE;
         }
-        else if( !strncasecmp( s, "zerolatency", 11 ) )
+        else if( len == 11 && !strncasecmp( tune, "zerolatency", 11 ) )
         {
             param->rc.i_lookahead = 0;
             param->i_sync_lookahead = 0;
@@ -626,7 +633,7 @@ static int param_apply_tune( x264_param_t *param, const char *tune )
             param->b_vfr_input = 0;
             param->rc.b_mb_tree = 0;
         }
-        else if( !strncasecmp( s, "touhou", 6 ) )
+        else if( len == 6 && !strncasecmp( tune, "touhou", 6 ) )
         {
             if( psy_tuning_used++ ) goto psy_failure;
             param->i_frame_reference = param->i_frame_reference > 1 ? param->i_frame_reference*2 : 1;
@@ -639,24 +646,18 @@ static int param_apply_tune( x264_param_t *param, const char *tune )
         }
         else
         {
-            x264_log_internal( X264_LOG_ERROR, "invalid tune '%s'\n", s );
-            x264_free( tmp );
+            x264_log_internal( X264_LOG_ERROR, "invalid tune '%.*s'\n", len, tune );
             return -1;
-        }
-        if( 0 )
-        {
     psy_failure:
-            x264_log_internal( X264_LOG_WARNING, "only 1 psy tuning can be used: ignoring tune %s\n", s );
+            x264_log_internal( X264_LOG_WARNING, "only 1 psy tuning can be used: ignoring tune %.*s\n", len, tune );
         }
-        s = strtok( NULL, ",./-+" );
     }
-    x264_free( tmp );
     return 0;
 }
 
-int x264_param_default_preset( x264_param_t *param, const char *preset, const char *tune )
+static int param_default_preset( x264_param_t *param, const char *preset, const char *tune )
 {
-    x264_param_default( param );
+    param_default( param );
 
     if( preset && param_apply_preset( param, preset ) < 0 )
         return -1;
@@ -665,7 +666,12 @@ int x264_param_default_preset( x264_param_t *param, const char *preset, const ch
     return 0;
 }
 
-void x264_param_apply_fastfirstpass( x264_param_t *param )
+int x264_param_default_preset( x264_param_t *param, const char *preset, const char *tune )
+{
+    return x264_stack_align( param_default_preset, param, preset, tune );
+}
+
+static void param_apply_fastfirstpass( x264_param_t *param )
 {
     /* Set faster options in case of turbo firstpass. */
     if( param->rc.b_stat_write && !param->rc.b_stat_read )
@@ -678,6 +684,11 @@ void x264_param_apply_fastfirstpass( x264_param_t *param )
         param->analyse.i_trellis = 0;
         param->analyse.b_fast_pskip = 1;
     }
+}
+
+void x264_param_apply_fastfirstpass( x264_param_t *param )
+{
+    x264_stack_align( param_apply_fastfirstpass, param );
 }
 
 static int profile_string_to_int( const char *str )
@@ -697,7 +708,7 @@ static int profile_string_to_int( const char *str )
     return -1;
 }
 
-int x264_param_apply_profile( x264_param_t *param, const char *profile )
+static int param_apply_profile( x264_param_t *param, const char *profile )
 {
     if( !profile )
         return 0;
@@ -730,6 +741,11 @@ int x264_param_apply_profile( x264_param_t *param, const char *profile )
         x264_log_internal( X264_LOG_ERROR, "%s profile doesn't support a bit depth of %d\n", profile, param->i_bitdepth );
         return -1;
     }
+    if( p < PROFILE_HIGH && (param->i_csp & X264_CSP_MASK) == X264_CSP_I400 )
+    {
+        x264_log_internal( X264_LOG_ERROR, "%s profile doesn't support 4:0:0\n", profile );
+        return -1;
+    }
 
     if( p == PROFILE_BASELINE )
     {
@@ -757,6 +773,11 @@ int x264_param_apply_profile( x264_param_t *param, const char *profile )
         param->psz_cqm_file = NULL;
     }
     return 0;
+}
+
+int x264_param_apply_profile( x264_param_t *param, const char *profile )
+{
+    return x264_stack_align( param_apply_profile, param, profile );
 }
 
 static int parse_enum( const char *arg, const char * const *names, int *dst )
@@ -820,7 +841,7 @@ static double atof_internal( const char *str, int *b_error )
 #define atoi(str) atoi_internal( str, &b_error )
 #define atof(str) atof_internal( str, &b_error )
 
-int x264_param_parse( x264_param_t *p, const char *name, const char *value )
+static int param_parse( x264_param_t *p, const char *name, const char *value )
 {
     char *name_buf = NULL;
     int b_error = 0;
@@ -926,6 +947,8 @@ int x264_param_parse( x264_param_t *p, const char *name, const char *value )
         p->b_bluray_compat = atobool(value);
     OPT("avcintra-class")
         p->i_avcintra_class = atoi(value);
+    OPT("avcintra-flavor")
+        b_error |= parse_enum( value, x264_avcintra_flavor_names, &p->i_avcintra_flavor );
     OPT("sar")
     {
         b_error = ( 2 != sscanf( value, "%d:%d", &p->vui.i_sar_width, &p->vui.i_sar_height ) &&
@@ -1301,26 +1324,6 @@ int x264_param_parse( x264_param_t *p, const char *name, const char *value )
         p->psz_clbin_file = strdup( value );
     OPT("opencl-device")
         p->i_opencl_device = atoi( value );
-#if WZ_CAE_MB_REENCODE || WZ_CAE_MODE
-    OPT("ssdmax")
-        p->f_max_ssd = atof(value);
-    OPT("ssdmin")
-        p->f_min_ssd = atof( value );
-    OPT("ssimmin")
-        p->f_min_ssim = atof( value );
-    OPT("psnrmin"){
-        p->f_min_psnr = atof( value );
-        p->f_max_ssd_avg = pow(10,-p->f_min_psnr/10.0)*255*255;
-    }
-#endif
-#if WZ_CAE_FRAME_REENCODE
-    OPT("frame-ssdmax"){
-        p->f_frame_maxssd = atof(value);
-    }  
-    OPT("frame-ssdmin"){
-        p->f_frame_minssd = atof(value);
-    }
-#endif        
     else
     {
         b_error = 1;
@@ -1337,6 +1340,11 @@ int x264_param_parse( x264_param_t *p, const char *name, const char *value )
 
     b_error |= value_was_null && !name_was_bool;
     return b_error ? errortype : 0;
+}
+
+int x264_param_parse( x264_param_t *param, const char *name, const char *value )
+{
+    return x264_stack_align( param_parse, param, name, value );
 }
 
 /****************************************************************************
@@ -1359,10 +1367,7 @@ char *x264_param2string( x264_param_t *p, int b_res )
         s += sprintf( s, "timebase=%u/%u ", p->i_timebase_num, p->i_timebase_den );
         s += sprintf( s, "bitdepth=%d ", p->i_bitdepth );
     }
-#if WZ_CAE
-    if(b_res)
-    {
-#endif
+
     if( p->b_opencl )
         s += sprintf( s, "opencl=%d ", p->b_opencl );
     s += sprintf( s, "cabac=%d", p->b_cabac );
@@ -1472,11 +1477,6 @@ char *x264_param2string( x264_param_t *p, int b_res )
         else if( p->rc.i_zones )
             s += sprintf( s, " zones" );
     }
-#if WZ_CAE
-    }
-    else{
-        s += sprintf( s, "weizhen technology.");
-    }
-#endif
+
     return buf;
 }

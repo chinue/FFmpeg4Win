@@ -1,7 +1,7 @@
 /*****************************************************************************
  * common.h: misc common functions
  *****************************************************************************
- * Copyright (C) 2003-2018 x264 project
+ * Copyright (C) 2003-2019 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -86,7 +86,7 @@
 #    define CHROMA_V_SHIFT h->mb.chroma_v_shift
 #endif
 
-#define CHROMA_SIZE(s) ((s)>>(CHROMA_H_SHIFT+CHROMA_V_SHIFT))
+#define CHROMA_SIZE(s) (CHROMA_FORMAT ? (s)>>(CHROMA_H_SHIFT+CHROMA_V_SHIFT) : 0)
 #define FRAME_SIZE(s) ((s)+2*CHROMA_SIZE(s))
 #define CHROMA444 (CHROMA_FORMAT == CHROMA_444)
 
@@ -647,10 +647,6 @@ struct x264_t
         } cache;
 
         /* */
-#if WZ_CAE
-        float   f_lambda_factor;
-        int     b_cae_mb_retry;
-#endif
         int     i_qp;       /* current qp */
         int     i_chroma_qp;
         int     i_last_qp;  /* last qp */
@@ -699,18 +695,6 @@ struct x264_t
         double  f_psnr_mean_v[3];
         double  f_ssim_mean_y[3];
         double  f_frame_duration[3];
-#if WZ_CAE
-        double  f_psnr_min;
-        float   f_ssd_max;
-        float   f_ssim_min;
-        float   f_ssim4_min;
-        float   f_ssim4ave_min;
-        float   f_frame_ssim4_min;
-        float   f_frame_ssim4ave_min;
-#if WZ_CAE_FRAME_REENCODE
-        float   f_pre_ssd_max;
-#endif
-#endif
         /* */
         int64_t i_mb_count[3][19];
         int64_t i_mb_partition[2][17];
@@ -783,7 +767,7 @@ typedef struct
 // included at the end because it needs x264_t
 #include "macroblock.h"
 
-static int ALWAYS_INLINE x264_predictor_roundclip( int16_t (*dst)[2], int16_t (*mvc)[2], int i_mvc, int16_t mv_limit[2][2], uint32_t pmv )
+static ALWAYS_INLINE int x264_predictor_roundclip( int16_t (*dst)[2], int16_t (*mvc)[2], int i_mvc, int16_t mv_limit[2][2], uint32_t pmv )
 {
     int cnt = 0;
     for( int i = 0; i < i_mvc; i++ )
@@ -799,7 +783,7 @@ static int ALWAYS_INLINE x264_predictor_roundclip( int16_t (*dst)[2], int16_t (*
     return cnt;
 }
 
-static int ALWAYS_INLINE x264_predictor_clip( int16_t (*dst)[2], int16_t (*mvc)[2], int i_mvc, int16_t mv_limit[2][2], uint32_t pmv )
+static ALWAYS_INLINE int x264_predictor_clip( int16_t (*dst)[2], int16_t (*mvc)[2], int i_mvc, int16_t mv_limit[2][2], uint32_t pmv )
 {
     int cnt = 0;
     int qpel_limit[4] = {mv_limit[0][0] << 2, mv_limit[0][1] << 2, mv_limit[1][0] << 2, mv_limit[1][1] << 2};

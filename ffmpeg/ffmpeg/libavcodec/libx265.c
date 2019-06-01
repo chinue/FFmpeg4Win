@@ -79,6 +79,7 @@ static av_cold int libx265_encode_close(AVCodecContext *avctx)
 static av_cold int libx265_encode_init(AVCodecContext *avctx)
 {
     libx265Context *ctx = avctx->priv_data;
+    AVCPBProperties *cpb_props = NULL;
 
     ctx->api = x265_api_get(av_pix_fmt_desc_get(avctx->pix_fmt)->comp[0].depth);
     if (!ctx->api)
@@ -109,11 +110,17 @@ static av_cold int libx265_encode_init(AVCodecContext *avctx)
     }
 
     ctx->params->frameNumThreads = avctx->thread_count;
-    ctx->params->fpsNum          = avctx->time_base.den;
-    ctx->params->fpsDenom        = avctx->time_base.num * avctx->ticks_per_frame;
+    if (avctx->framerate.num > 0 && avctx->framerate.den > 0) {
+        ctx->params->fpsNum      = avctx->framerate.num;
+        ctx->params->fpsDenom    = avctx->framerate.den;
+    } else {
+        ctx->params->fpsNum      = avctx->time_base.den;
+        ctx->params->fpsDenom    = avctx->time_base.num * avctx->ticks_per_frame;
+    }
     ctx->params->sourceWidth     = avctx->width;
     ctx->params->sourceHeight    = avctx->height;
     ctx->params->bEnablePsnr     = !!(avctx->flags & AV_CODEC_FLAG_PSNR);
+    ctx->params->bOpenGOP        = !(avctx->flags & AV_CODEC_FLAG_CLOSED_GOP);
 
     /* Tune the CTU size based on input resolution. */
     if (ctx->params->sourceWidth < 64 || ctx->params->sourceHeight < 64)
@@ -126,6 +133,14 @@ static av_cold int libx265_encode_init(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
+
+    ctx->params->vui.bEnableVideoSignalTypePresentFlag = 1;
+
+    ctx->params->vui.bEnableVideoFullRangeFlag = avctx->pix_fmt == AV_PIX_FMT_YUVJ420P ||
+                                                 avctx->pix_fmt == AV_PIX_FMT_YUVJ422P ||
+                                                 avctx->pix_fmt == AV_PIX_FMT_YUVJ444P ||
+                                                 avctx->color_range == AVCOL_RANGE_JPEG;
+
     if ((avctx->color_primaries <= AVCOL_PRI_SMPTE432 &&
          avctx->color_primaries != AVCOL_PRI_UNSPECIFIED) ||
         (avctx->color_trc <= AVCOL_TRC_ARIB_STD_B67 &&
@@ -133,7 +148,6 @@ static av_cold int libx265_encode_init(AVCodecContext *avctx)
         (avctx->colorspace <= AVCOL_SPC_ICTCP &&
          avctx->colorspace != AVCOL_SPC_UNSPECIFIED)) {
 
-        ctx->params->vui.bEnableVideoSignalTypePresentFlag  = 1;
         ctx->params->vui.bEnableColorDescriptionPresentFlag = 1;
 
         // x265 validates the parameters internally
@@ -204,6 +218,16 @@ static av_cold int libx265_encode_init(AVCodecContext *avctx)
         ctx->params->rc.rateControlMode = X265_RC_ABR;
     }
 
+    ctx->params->rc.vbvBufferSize = avctx->rc_buffer_size / 1000;
+    ctx->params->rc.vbvMaxBitrate = avctx->rc_max_rate    / 1000;
+
+    cpb_props = ff_add_cpb_side_data(avctx);
+    if (!cpb_props)
+        return AVERROR(ENOMEM);
+    cpb_props->buffer_size = ctx->params->rc.vbvBufferSize * 1000;
+    cpb_props->max_bitrate = ctx->params->rc.vbvMaxBitrate * 1000;
+    cpb_props->avg_bitrate = ctx->params->rc.bitrate       * 1000;
+
     if (!(avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER))
         ctx->params->bRepeatHeaders = 1;
 
@@ -230,6 +254,11 @@ static av_cold int libx265_encode_init(AVCodecContext *avctx)
             }
             av_dict_free(&dict);
         }
+    }
+
+    if (ctx->params->rc.vbvBufferSize && avctx->rc_initial_buffer_occupancy > 1000 &&
+        ctx->params->rc.vbvBufferInit == 0.9) {
+        ctx->params->rc.vbvBufferInit = (float)avctx->rc_initial_buffer_occupancy / 1000;
     }
 
     if (ctx->profile) {
@@ -276,6 +305,65 @@ static av_cold int libx265_encode_init(AVCodecContext *avctx)
     return 0;
 }
 
+static av_cold int libx265_encode_set_roi(libx265Context *ctx, const AVFrame *frame, x265_picture* pic)
+{
+    AVFrameSideData *sd = av_frame_get_side_data(frame, AV_FRAME_DATA_REGIONS_OF_INTEREST);
+    if (sd) {
+        if (ctx->params->rc.aqMode == X265_AQ_NONE) {
+            av_log(ctx, AV_LOG_WARNING, "Adaptive quantization must be enabled to use ROI encoding, skipping ROI.\n");
+        } else {
+            /* 8x8 block when qg-size is 8, 16*16 block otherwise. */
+            int mb_size = (ctx->params->rc.qgSize == 8) ? 8 : 16;
+            int mbx = (frame->width + mb_size - 1) / mb_size;
+            int mby = (frame->height + mb_size - 1) / mb_size;
+            int nb_rois;
+            AVRegionOfInterest *roi;
+            float *qoffsets;         /* will be freed after encode is called. */
+            qoffsets = av_mallocz_array(mbx * mby, sizeof(*qoffsets));
+            if (!qoffsets)
+                return AVERROR(ENOMEM);
+
+            nb_rois = sd->size / sizeof(AVRegionOfInterest);
+            roi = (AVRegionOfInterest*)sd->data;
+            for (int count = 0; count < nb_rois; count++) {
+                int starty = FFMIN(mby, roi->top / mb_size);
+                int endy   = FFMIN(mby, (roi->bottom + mb_size - 1)/ mb_size);
+                int startx = FFMIN(mbx, roi->left / mb_size);
+                int endx   = FFMIN(mbx, (roi->right + mb_size - 1)/ mb_size);
+                float qoffset;
+
+                if (roi->self_size == 0) {
+                    av_free(qoffsets);
+                    av_log(ctx, AV_LOG_ERROR, "AVRegionOfInterest.self_size must be set to sizeof(AVRegionOfInterest).\n");
+                    return AVERROR(EINVAL);
+                }
+
+                if (roi->qoffset.den == 0) {
+                    av_free(qoffsets);
+                    av_log(ctx, AV_LOG_ERROR, "AVRegionOfInterest.qoffset.den must not be zero.\n");
+                    return AVERROR(EINVAL);
+                }
+                qoffset = roi->qoffset.num * 1.0f / roi->qoffset.den;
+                qoffset = av_clipf(qoffset, -1.0f, 1.0f);
+
+                /* qp range of x265 is from 0 to 51, just choose 25 as the scale value,
+                 * so the range of final qoffset is [-25.0, 25.0].
+                 */
+                qoffset = qoffset * 25;
+
+                for (int y = starty; y < endy; y++)
+                    for (int x = startx; x < endx; x++)
+                        qoffsets[x + y*mbx] = qoffset;
+
+                roi = (AVRegionOfInterest*)((char*)roi + roi->self_size);
+            }
+
+            pic->quantOffsets = qoffsets;
+        }
+    }
+    return 0;
+}
+
 static int libx265_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
                                 const AVFrame *pic, int *got_packet)
 {
@@ -305,10 +393,17 @@ static int libx265_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
                             pic->pict_type == AV_PICTURE_TYPE_P ? X265_TYPE_P :
                             pic->pict_type == AV_PICTURE_TYPE_B ? X265_TYPE_B :
                             X265_TYPE_AUTO;
+
+        ret = libx265_encode_set_roi(ctx, pic, &x265pic);
+        if (ret < 0)
+            return ret;
     }
 
     ret = ctx->api->encoder_encode(ctx->encoder, &nal, &nnal,
                                    pic ? &x265pic : NULL, &x265pic_out);
+
+    av_freep(&x265pic.quantOffsets);
+
     if (ret < 0)
         return AVERROR_EXTERNAL;
 
@@ -366,8 +461,11 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
 static const enum AVPixelFormat x265_csp_eight[] = {
     AV_PIX_FMT_YUV420P,
+    AV_PIX_FMT_YUVJ420P,
     AV_PIX_FMT_YUV422P,
+    AV_PIX_FMT_YUVJ422P,
     AV_PIX_FMT_YUV444P,
+    AV_PIX_FMT_YUVJ444P,
     AV_PIX_FMT_GBRP,
     AV_PIX_FMT_GRAY8,
     AV_PIX_FMT_NONE
@@ -375,8 +473,11 @@ static const enum AVPixelFormat x265_csp_eight[] = {
 
 static const enum AVPixelFormat x265_csp_ten[] = {
     AV_PIX_FMT_YUV420P,
+    AV_PIX_FMT_YUVJ420P,
     AV_PIX_FMT_YUV422P,
+    AV_PIX_FMT_YUVJ422P,
     AV_PIX_FMT_YUV444P,
+    AV_PIX_FMT_YUVJ444P,
     AV_PIX_FMT_GBRP,
     AV_PIX_FMT_YUV420P10,
     AV_PIX_FMT_YUV422P10,
@@ -389,8 +490,11 @@ static const enum AVPixelFormat x265_csp_ten[] = {
 
 static const enum AVPixelFormat x265_csp_twelve[] = {
     AV_PIX_FMT_YUV420P,
+    AV_PIX_FMT_YUVJ420P,
     AV_PIX_FMT_YUV422P,
+    AV_PIX_FMT_YUVJ422P,
     AV_PIX_FMT_YUV444P,
+    AV_PIX_FMT_YUVJ444P,
     AV_PIX_FMT_GBRP,
     AV_PIX_FMT_YUV420P10,
     AV_PIX_FMT_YUV422P10,

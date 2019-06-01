@@ -1,7 +1,7 @@
 ;*****************************************************************************
 ;* mc-a.asm: x86 motion compensation
 ;*****************************************************************************
-;* Copyright (C) 2003-2018 x264 project
+;* Copyright (C) 2003-2019 x264 project
 ;*
 ;* Authors: Loren Merritt <lorenm@u.washington.edu>
 ;*          Fiona Glaser <fiona@x264.com>
@@ -1331,7 +1331,7 @@ cglobal pixel_avg2_w16_cache64_ssse3
     sub    r4, r2
     shl    r6, 4         ;jump = (offset + align*2)*48
 %define avg_w16_addr avg_w16_align1_1_ssse3-(avg_w16_align2_2_ssse3-avg_w16_align1_1_ssse3)
-%ifdef PIC
+%if ARCH_X86_64
     lea    r7, [avg_w16_addr]
     add    r6, r7
 %else
@@ -1514,6 +1514,25 @@ cglobal prefetch_fenc_%1, 0,3
 INIT_MMX mmx2
 PREFETCH_FENC 420
 PREFETCH_FENC 422
+
+%if ARCH_X86_64
+    DECLARE_REG_TMP 4
+%else
+    DECLARE_REG_TMP 2
+%endif
+
+cglobal prefetch_fenc_400, 2,3
+    movifnidn  t0d, r4m
+    FIX_STRIDES r1
+    and        t0d, 3
+    imul       t0d, r1d
+    lea         r0, [r0+t0*4+64*SIZEOF_PIXEL]
+    prefetcht0 [r0]
+    prefetcht0 [r0+r1]
+    lea         r0, [r0+r1*2]
+    prefetcht0 [r0]
+    prefetcht0 [r0+r1]
+    RET
 
 ;-----------------------------------------------------------------------------
 ; void prefetch_ref( pixel *pix, intptr_t stride, int parity )
@@ -2001,7 +2020,7 @@ cglobal mc_chroma
 %if cpuflag(cache64)
     mov       t0d, r3d
     and       t0d, 7
-%ifdef PIC
+%if ARCH_X86_64
     lea        t1, [ch_shuf_adj]
     movddup   xm5, [t1 + t0*4]
 %else

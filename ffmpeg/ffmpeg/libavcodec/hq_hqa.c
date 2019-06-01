@@ -181,6 +181,9 @@ static int hqa_decode_mb(HQContext *c, AVFrame *pic, int qgroup,
     int flag = 0;
     int i, ret, cbp;
 
+    if (get_bits_left(gb) < 1)
+        return AVERROR_INVALIDDATA;
+
     cbp = get_vlc2(gb, c->hqa_cbp_vlc.table, 5, 1);
 
     for (i = 0; i < 12; i++)
@@ -244,6 +247,9 @@ static int hqa_decode_frame(HQContext *ctx, AVFrame *pic, size_t data_size)
     int i, slice, ret;
     int width, height, quant;
     const uint8_t *src = ctx->gbc.buffer;
+
+    if (bytestream2_get_bytes_left(&ctx->gbc) < 8 + 4*(num_slices + 1))
+        return AVERROR_INVALIDDATA;
 
     width  = bytestream2_get_be16(&ctx->gbc);
     height = bytestream2_get_be16(&ctx->gbc);

@@ -1,7 +1,7 @@
 /*****************************************************************************
  * set.h: quantization init
  *****************************************************************************
- * Copyright (C) 2003-2018 x264 project
+ * Copyright (C) 2003-2019 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -53,6 +53,8 @@ typedef struct
     int b_constraint_set1;
     int b_constraint_set2;
     int b_constraint_set3;
+    int b_constraint_set4;
+    int b_constraint_set5;
 
     int i_log2_max_frame_num;
 
@@ -140,6 +142,10 @@ typedef struct
     int b_qpprime_y_zero_transform_bypass;
     int i_chroma_format_idc;
 
+    int b_avcintra;
+    int i_cqm_preset;
+    const uint8_t *scaling_list[8]; /* could be 12, but we don't allow separate Cb/Cr lists */
+
 } x264_sps_t;
 
 typedef struct
@@ -168,9 +174,6 @@ typedef struct
     int b_redundant_pic_cnt;
 
     int b_transform_8x8_mode;
-
-    int i_cqm_preset;
-    const uint8_t *scaling_list[8]; /* could be 12, but we don't allow separate Cb/Cr lists */
 
 } x264_pps_t;
 
