@@ -107,7 +107,7 @@ cp -r $INSTALL/lib/libx264.lib $INSTALL/../../ffmpeg/external/win32/lib/libx264.
 ## 3. 编译av1解码器
 **3.1 编译libaom**
 
-​    直接用cmake生成vs2015工程，可以关闭编译器，关闭test可以减少工程数，生成的工程的代码生成里面要设置成/MT
+​    直接用cmake生成vs2015工程，可以关闭Encoder，关闭test可以减少工程数，生成的工程的代码生成里面要设置成/MT
 
 ![](.assets/aom.png)
 
@@ -277,4 +277,4 @@ rm -f test.obj
 
 + 如果编译64位库，先执行`./clean.sh`，然后执行`./build64.sh`
 
-**把output目录下面生成的lib文件拷贝到`ffmpegDll`工程中，然后编译生成`ffmpeg.dll`**
+**把output目录下面生成的lib文件拷贝到 [ffmpegDll](https://github.com/chinue/FFmpegDll) 工程中，然后编译生成`ffmpeg.dll`**
