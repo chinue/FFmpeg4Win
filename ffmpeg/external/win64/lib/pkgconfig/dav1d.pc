@@ -1,0 +1,9 @@
+prefix=${pcfiledir}/../../..
+libdir=${prefix}/win64/lib
+includedir=${prefix}/include
+
+Name: libdav1d
+Description: AV1 decoding library
+Version: 0.7.0
+Libs: -L${libdir} -ldav1d
+Cflags: -I${includedir}

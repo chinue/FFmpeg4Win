@@ -33,12 +33,14 @@ typedef struct AFFTFiltContext {
     const AVClass *class;
     char *real_str;
     char *img_str;
+    int fft_size;
     int fft_bits;
 
     FFTContext *fft, *ifft;
     FFTComplex **fft_data;
     FFTComplex **fft_temp;
     int nb_exprs;
+    int channels;
     int window_size;
     AVExpr **real;
     AVExpr **imag;
@@ -49,7 +51,6 @@ typedef struct AFFTFiltContext {
     AVFrame *buffer;
     int eof;
     int win_func;
-    float win_scale;
     float *window_func_lut;
 } AFFTFiltContext;
 
@@ -62,21 +63,7 @@ enum                                   { VAR_SAMPLE_RATE, VAR_BIN, VAR_NBBINS, V
 static const AVOption afftfilt_options[] = {
     { "real", "set channels real expressions",       OFFSET(real_str), AV_OPT_TYPE_STRING, {.str = "re" }, 0, 0, A },
     { "imag", "set channels imaginary expressions",  OFFSET(img_str),  AV_OPT_TYPE_STRING, {.str = "im" }, 0, 0, A },
-    { "win_size", "set window size", OFFSET(fft_bits), AV_OPT_TYPE_INT, {.i64=12}, 4, 17, A, "fft" },
-        { "w16",    0, 0, AV_OPT_TYPE_CONST, {.i64=4},  0, 0, A, "fft" },
-        { "w32",    0, 0, AV_OPT_TYPE_CONST, {.i64=5},  0, 0, A, "fft" },
-        { "w64",    0, 0, AV_OPT_TYPE_CONST, {.i64=6},  0, 0, A, "fft" },
-        { "w128",   0, 0, AV_OPT_TYPE_CONST, {.i64=7},  0, 0, A, "fft" },
-        { "w256",   0, 0, AV_OPT_TYPE_CONST, {.i64=8},  0, 0, A, "fft" },
-        { "w512",   0, 0, AV_OPT_TYPE_CONST, {.i64=9},  0, 0, A, "fft" },
-        { "w1024",  0, 0, AV_OPT_TYPE_CONST, {.i64=10}, 0, 0, A, "fft" },
-        { "w2048",  0, 0, AV_OPT_TYPE_CONST, {.i64=11}, 0, 0, A, "fft" },
-        { "w4096",  0, 0, AV_OPT_TYPE_CONST, {.i64=12}, 0, 0, A, "fft" },
-        { "w8192",  0, 0, AV_OPT_TYPE_CONST, {.i64=13}, 0, 0, A, "fft" },
-        { "w16384", 0, 0, AV_OPT_TYPE_CONST, {.i64=14}, 0, 0, A, "fft" },
-        { "w32768", 0, 0, AV_OPT_TYPE_CONST, {.i64=15}, 0, 0, A, "fft" },
-        { "w65536", 0, 0, AV_OPT_TYPE_CONST, {.i64=16}, 0, 0, A, "fft" },
-        { "w131072",0, 0, AV_OPT_TYPE_CONST, {.i64=17}, 0, 0, A, "fft" },
+    { "win_size", "set window size", OFFSET(fft_size), AV_OPT_TYPE_INT, {.i64=4096}, 16, 131072, A },
     { "win_func", "set window function", OFFSET(win_func), AV_OPT_TYPE_INT, {.i64 = WFUNC_HANNING}, 0, NB_WFUNC-1, A, "win_func" },
         { "rect",     "Rectangular",      0, AV_OPT_TYPE_CONST, {.i64=WFUNC_RECT},     0, 0, A, "win_func" },
         { "bartlett", "Bartlett",         0, AV_OPT_TYPE_CONST, {.i64=WFUNC_BARTLETT}, 0, 0, A, "win_func" },
@@ -138,12 +125,14 @@ static int config_input(AVFilterLink *inlink)
     AVFilterContext *ctx = inlink->dst;
     AFFTFiltContext *s = ctx->priv;
     char *saveptr = NULL;
-    int ret = 0, ch, i;
+    int ret = 0, ch;
     float overlap;
     char *args;
     const char *last_expr = "1";
 
+    s->channels = inlink->channels;
     s->pts  = AV_NOPTS_VALUE;
+    s->fft_bits = av_log2(s->fft_size);
     s->fft  = av_fft_init(s->fft_bits, 0);
     s->ifft = av_fft_init(s->fft_bits, 1);
     if (!s->fft || !s->ifft)
@@ -189,30 +178,32 @@ static int config_input(AVFilterLink *inlink)
         ret = av_expr_parse(&s->real[ch], arg ? arg : last_expr, var_names,
                             NULL, NULL, func2_names, func2, 0, ctx);
         if (ret < 0)
-            break;
+            goto fail;
         if (arg)
             last_expr = arg;
         s->nb_exprs++;
     }
 
-    av_free(args);
+    av_freep(&args);
 
     args = av_strdup(s->img_str ? s->img_str : s->real_str);
     if (!args)
         return AVERROR(ENOMEM);
 
+    saveptr = NULL;
+    last_expr = "1";
     for (ch = 0; ch < inlink->channels; ch++) {
         char *arg = av_strtok(ch == 0 ? args : NULL, "|", &saveptr);
 
         ret = av_expr_parse(&s->imag[ch], arg ? arg : last_expr, var_names,
                             NULL, NULL, func2_names, func2, 0, ctx);
         if (ret < 0)
-            break;
+            goto fail;
         if (arg)
             last_expr = arg;
     }
 
-    av_free(args);
+    av_freep(&args);
 
     s->fifo = av_audio_fifo_alloc(inlink->format, inlink->channels, s->window_size);
     if (!s->fifo)
@@ -226,10 +217,6 @@ static int config_input(AVFilterLink *inlink)
     if (s->overlap == 1)
         s->overlap = overlap;
 
-    for (s->win_scale = 0, i = 0; i < s->window_size; i++) {
-        s->win_scale += s->window_func_lut[i] * s->window_func_lut[i];
-    }
-
     s->hop_size = s->window_size * (1 - s->overlap);
     if (s->hop_size <= 0)
         return AVERROR(EINVAL);
@@ -237,6 +224,9 @@ static int config_input(AVFilterLink *inlink)
     s->buffer = ff_get_audio_buffer(inlink, s->window_size * 2);
     if (!s->buffer)
         return AVERROR(ENOMEM);
+
+fail:
+    av_freep(&args);
 
     return ret;
 }
@@ -247,7 +237,7 @@ static int filter_frame(AVFilterLink *inlink)
     AVFilterLink *outlink = ctx->outputs[0];
     AFFTFiltContext *s = ctx->priv;
     const int window_size = s->window_size;
-    const float f = 1. / s->win_scale;
+    const float f = 1. / (s->window_size / 2);
     double values[VAR_VARS_NB];
     AVFrame *out, *in = NULL;
     int ch, n, ret, i;
@@ -330,7 +320,7 @@ static int filter_frame(AVFilterLink *inlink)
     }
 
     out->pts = s->pts;
-    s->pts += s->hop_size;
+    s->pts += av_rescale_q(s->hop_size, (AVRational){1, outlink->sample_rate}, outlink->time_base);
 
     for (ch = 0; ch < inlink->channels; ch++) {
         float *dst = (float *)out->extended_data[ch];
@@ -447,7 +437,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_fft_end(s->fft);
     av_fft_end(s->ifft);
 
-    for (i = 0; i < s->nb_exprs; i++) {
+    for (i = 0; i < s->channels; i++) {
         if (s->fft_data)
             av_freep(&s->fft_data[i]);
         if (s->fft_temp)

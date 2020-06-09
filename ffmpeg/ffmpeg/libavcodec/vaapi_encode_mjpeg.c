@@ -227,6 +227,8 @@ static int vaapi_encode_mjpeg_init_picture_params(AVCodecContext *avctx,
     JPEGRawScanHeader                 *sh = &priv->scan.header;
     VAEncPictureParameterBufferJPEG *vpic = pic->codec_picture_params;
     const AVPixFmtDescriptor *desc;
+    const uint8_t components_rgb[3] = { 'R', 'G', 'B' };
+    const uint8_t components_yuv[3] = {  1,   2,   3  };
     const uint8_t *components;
     int t, i, quant_scale, len;
 
@@ -235,9 +237,9 @@ static int vaapi_encode_mjpeg_init_picture_params(AVCodecContext *avctx,
     desc = av_pix_fmt_desc_get(priv->common.input_frames->sw_format);
     av_assert0(desc);
     if (desc->flags & AV_PIX_FMT_FLAG_RGB)
-        components = (uint8_t[3]) { 'R', 'G', 'B' };
+        components = components_rgb;
     else
-        components = (uint8_t[3]) {  1,   2,   3  };
+        components = components_yuv;
 
     // Frame header.
 
@@ -561,12 +563,13 @@ AVCodec ff_mjpeg_vaapi_encoder = {
     .receive_packet = &ff_vaapi_encode_receive_packet,
     .close          = &vaapi_encode_mjpeg_close,
     .priv_class     = &vaapi_encode_mjpeg_class,
-    .capabilities   = AV_CODEC_CAP_HARDWARE |
-                      AV_CODEC_CAP_INTRA_ONLY,
+    .capabilities   = AV_CODEC_CAP_HARDWARE,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .defaults       = vaapi_encode_mjpeg_defaults,
     .pix_fmts = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_VAAPI,
         AV_PIX_FMT_NONE,
     },
+    .hw_configs     = ff_vaapi_encode_hw_configs,
     .wrapper_name   = "vaapi",
 };

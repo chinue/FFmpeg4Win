@@ -25,6 +25,7 @@
 #include "imgutils.h"
 #include "mem.h"
 #include "samplefmt.h"
+#include "hwcontext.h"
 
 #if FF_API_FRAME_GET_SET
 MAKE_ACCESSORS(AVFrame, frame, int64_t, best_effort_timestamp)
@@ -91,13 +92,13 @@ int8_t *av_frame_get_qp_table(AVFrame *f, int *stride, int *type)
 {
     AVBufferRef *buf = NULL;
 
-    *stride = 0;
-    *type   = 0;
+    if(stride) *stride = 0;
+    if(type) *type   = 0;
 
 FF_DISABLE_DEPRECATION_WARNINGS
     if (f->qp_table_buf) {
-        *stride = f->qstride;
-        *type   = f->qscale_type;
+        if(stride) *stride = f->qstride;
+        if(type) *type   = f->qscale_type;
         buf     = f->qp_table_buf;
 FF_ENABLE_DEPRECATION_WARNINGS
     } else {
@@ -110,12 +111,36 @@ FF_ENABLE_DEPRECATION_WARNINGS
         sd = av_frame_get_side_data(f, AV_FRAME_DATA_QP_TABLE_DATA);
         if (!sd)
             return NULL;
-        *stride = p->stride;
-        *type   = p->type;
+        if(stride) *stride = p->stride;
+        if(type) *type   = p->type;
         buf     = sd->buf;
     }
 
     return buf ? buf->data : NULL;
+}
+#endif
+
+#if FF_API_FRAME_MBTYPE
+int av_frame_set_mb_type(AVFrame *f, AVBufferRef *buf, int stride)
+{
+FF_DISABLE_DEPRECATION_WARNINGS
+    av_buffer_unref(&f->mb_type_ref);
+    f->mb_type_ref = (buf);
+FF_ENABLE_DEPRECATION_WARNINGS
+    return 0;
+}
+uint32_t *av_frame_get_mb_type(AVFrame *f, int *stride)
+{
+    AVBufferRef *buf = NULL;
+    if(stride) *stride = 0;
+FF_DISABLE_DEPRECATION_WARNINGS
+    if (f->mb_type_ref)
+    {
+        if(stride) *stride = f->qstride;
+        buf     = f->mb_type_ref;
+    }
+FF_ENABLE_DEPRECATION_WARNINGS
+    return (uint32_t*)(buf ? buf->data : NULL);
 }
 #endif
 
@@ -424,7 +449,13 @@ FF_DISABLE_DEPRECATION_WARNINGS
     }
 FF_ENABLE_DEPRECATION_WARNINGS
 #endif
-
+#if FF_API_FRAME_MBTYPE
+FF_DISABLE_DEPRECATION_WARNINGS
+    av_buffer_unref(&dst->mb_type_ref);
+    if (src->mb_type_ref)
+        dst->mb_type_ref = av_buffer_ref(src->mb_type_ref);
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
     av_buffer_unref(&dst->opaque_ref);
     av_buffer_unref(&dst->private_ref);
     if (src->opaque_ref) {
@@ -460,7 +491,7 @@ int av_frame_ref(AVFrame *dst, const AVFrame *src)
 
     /* duplicate the frame data if it's not refcounted */
     if (!src->buf[0]) {
-        ret = av_frame_get_buffer(dst, 32);
+        ret = av_frame_get_buffer(dst, 0);
         if (ret < 0)
             return ret;
 
@@ -571,6 +602,12 @@ FF_DISABLE_DEPRECATION_WARNINGS
 FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
+#if FF_API_FRAME_MBTYPE
+FF_DISABLE_DEPRECATION_WARNINGS
+    av_buffer_unref(&frame->mb_type_ref);
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+
     av_buffer_unref(&frame->hw_frames_ctx);
 
     av_buffer_unref(&frame->opaque_ref);
@@ -626,7 +663,11 @@ int av_frame_make_writable(AVFrame *frame)
     tmp.channels       = frame->channels;
     tmp.channel_layout = frame->channel_layout;
     tmp.nb_samples     = frame->nb_samples;
-    ret = av_frame_get_buffer(&tmp, 32);
+
+    if (frame->hw_frames_ctx)
+        ret = av_hwframe_get_buffer(frame->hw_frames_ctx, &tmp, 0);
+    else
+        ret = av_frame_get_buffer(&tmp, 0);
     if (ret < 0)
         return ret;
 
@@ -752,6 +793,9 @@ static int frame_copy_video(AVFrame *dst, const AVFrame *src)
         dst->height < src->height)
         return AVERROR(EINVAL);
 
+    if (src->hw_frames_ctx || dst->hw_frames_ctx)
+        return av_hwframe_transfer_data(dst, src, 0);
+
     planes = av_pix_fmt_count_planes(dst->format);
     for (i = 0; i < planes; i++)
         if (!dst->data[i] || !src->data[i])
@@ -806,7 +850,7 @@ void av_frame_remove_side_data(AVFrame *frame, enum AVFrameSideDataType type)
 {
     int i;
 
-    for (i = 0; i < frame->nb_side_data; i++) {
+    for (i = frame->nb_side_data - 1; i >= 0; i--) {
         AVFrameSideData *sd = frame->side_data[i];
         if (sd->type == type) {
             free_side_data(&frame->side_data[i]);
@@ -842,6 +886,7 @@ const char *av_frame_side_data_name(enum AVFrameSideDataType type)
 #endif
     case AV_FRAME_DATA_DYNAMIC_HDR_PLUS: return "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)";
     case AV_FRAME_DATA_REGIONS_OF_INTEREST: return "Regions Of Interest";
+    case AV_FRAME_DATA_VIDEO_ENC_PARAMS:            return "Video encoding parameters";
     }
     return NULL;
 }

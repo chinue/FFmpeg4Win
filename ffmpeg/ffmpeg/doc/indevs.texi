@@ -178,6 +178,9 @@ Capture the mouse pointer. Default is 0.
 @item -capture_mouse_clicks
 Capture the screen mouse clicks. Default is 0.
 
+@item -capture_raw_data
+Capture the raw device data. Default is 0.
+Using this option may result in receiving the underlying data delivered to the AVFoundation framework. E.g. for muxed devices that sends raw DV data to the framework (like tape-based camcorders), setting this option to false results in extracted video frames captured in the designated pixel format only. Setting this option to true results in receiving the raw DV stream untouched.
 @end table
 
 @subsection Examples
@@ -207,6 +210,13 @@ Record video from the system default video device using the pixel format bgr0 an
 @example
 $ ffmpeg -f avfoundation -pixel_format bgr0 -i "default:none" out.avi
 @end example
+
+@item
+Record raw DV data from a suitable input device and write the output into out.dv:
+@example
+$ ffmpeg -f avfoundation -capture_raw_data true -i "zr100:none" out.dv
+@end example
+
 
 @end itemize
 
@@ -267,8 +277,8 @@ audio track.
 
 @item list_devices
 If set to @option{true}, print a list of devices and exit.
-Defaults to @option{false}. Alternatively you can use the @code{-sources}
-option of ffmpeg to list the available input devices.
+Defaults to @option{false}. This option is deprecated, please use the
+@code{-sources} option of ffmpeg to list the available input devices.
 
 @item list_formats
 If set to @option{true}, print a list of supported formats and exit.
@@ -281,11 +291,6 @@ Note that there is a FourCC @option{'pal '} that can also be used
 as @option{pal} (3 letters).
 Default behavior is autodetection of the input video format, if the hardware
 supports it.
-
-@item bm_v210
-This is a deprecated option, you can use @option{raw_format} instead.
-If set to @samp{1}, video is captured in 10 bit v210 instead
-of uyvy422. Not all Blackmagic devices support this option.
 
 @item raw_format
 Set the pixel format of the captured video.
@@ -385,6 +390,14 @@ Either sync could go wrong by 1 frame or in a rarer case
 @option{timestamp_align} seconds.
 Defaults to @samp{0}.
 
+@item wait_for_tc (@emph{bool})
+Drop frames till a frame with timecode is received. Sometimes serial timecode
+isn't received with the first input frame. If that happens, the stored stream
+timecode will be inaccurate. If this option is set to @option{true}, input frames
+are dropped till a frame with timecode is received.
+Option @var{timecode_format} must be specified.
+Defaults to @option{false}.
+
 @end table
 
 @subsection Examples
@@ -394,7 +407,7 @@ Defaults to @samp{0}.
 @item
 List input devices:
 @example
-ffmpeg -f decklink -list_devices 1 -i dummy
+ffmpeg -sources decklink
 @end example
 
 @item
@@ -412,7 +425,7 @@ ffmpeg -format_code Hi50 -f decklink -i 'Intensity Pro' -c:a copy -c:v copy outp
 @item
 Capture video clip at 1080i50 10 bit:
 @example
-ffmpeg -bm_v210 1 -format_code Hi50 -f decklink -i 'UltraStudio Mini Recorder' -c:a copy -c:v copy output.avi
+ffmpeg -raw_format yuv422p10 -format_code Hi50 -f decklink -i 'UltraStudio Mini Recorder' -c:a copy -c:v copy output.avi
 @end example
 
 @item
@@ -908,6 +921,14 @@ ffmpeg -f kmsgrab -i - -vf 'hwdownload,format=bgr0' output.mp4
 Capture from CRTC ID 42 at 60fps, map the result to VAAPI, convert to NV12 and encode as H.264.
 @example
 ffmpeg -crtc_id 42 -framerate 60 -f kmsgrab -i - -vf 'hwmap=derive_device=vaapi,scale_vaapi=w=1920:h=1080:format=nv12' -c:v h264_vaapi output.mp4
+@end example
+
+@item
+To capture only part of a plane the output can be cropped - this can be used to capture
+a single window, as long as it has a known absolute position and size.  For example, to
+capture and encode the middle quarter of a 1920x1080 plane:
+@example
+ffmpeg -f kmsgrab -i - -vf 'hwmap=derive_device=vaapi,crop=960:540:480:270,scale_vaapi=960:540:nv12' -c:v h264_vaapi output.mp4
 @end example
 
 @end itemize
@@ -1506,7 +1527,7 @@ ffmpeg -f x11grab -follow_mouse centered -show_region 1 -framerate 25 -video_siz
 @end example
 
 @item video_size
-Set the video frame size. Default value is @code{vga}.
+Set the video frame size. Default is the full desktop.
 
 @item grab_x
 @item grab_y

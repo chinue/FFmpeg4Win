@@ -41,6 +41,7 @@ typedef struct ShortTermRPS {
 
 typedef struct LongTermRPS {
     int     poc[32];
+    uint8_t poc_msb_present[32];
     uint8_t used[32];
     uint8_t nb_refs;
 } LongTermRPS;
@@ -177,11 +178,22 @@ typedef struct PTLCommon {
     uint8_t tier_flag;
     uint8_t profile_idc;
     uint8_t profile_compatibility_flag[32];
-    uint8_t level_idc;
     uint8_t progressive_source_flag;
     uint8_t interlaced_source_flag;
     uint8_t non_packed_constraint_flag;
     uint8_t frame_only_constraint_flag;
+    uint8_t max_12bit_constraint_flag;
+    uint8_t max_10bit_constraint_flag;
+    uint8_t max_8bit_constraint_flag;
+    uint8_t max_422chroma_constraint_flag;
+    uint8_t max_420chroma_constraint_flag;
+    uint8_t max_monochrome_constraint_flag;
+    uint8_t intra_constraint_flag;
+    uint8_t one_picture_only_constraint_flag;
+    uint8_t lower_bit_rate_constraint_flag;
+    uint8_t max_14bit_constraint_flag;
+    uint8_t inbld_flag;
+    uint8_t level_idc;
 } PTLCommon;
 
 typedef struct PTL {
@@ -347,8 +359,8 @@ typedef struct HEVCPPS {
     uint8_t tiles_enabled_flag;
     uint8_t entropy_coding_sync_enabled_flag;
 
-    int num_tile_columns;   ///< num_tile_columns_minus1 + 1
-    int num_tile_rows;      ///< num_tile_rows_minus1 + 1
+    uint16_t num_tile_columns;   ///< num_tile_columns_minus1 + 1
+    uint16_t num_tile_rows;      ///< num_tile_rows_minus1 + 1
     uint8_t uniform_spacing_flag;
     uint8_t loop_filter_across_tiles_enabled_flag;
 

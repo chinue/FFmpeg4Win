@@ -1,0 +1,9 @@
+prefix=${pcfiledir}/../../..
+libdir=${prefix}/win32/lib
+includedir=${prefix}/include
+
+Name: x264
+Description: H.264 (MPEG4 AVC) encoder library
+Version: 0.157.x
+Libs: -L${libdir} -lx264
+Cflags: -I${includedir}

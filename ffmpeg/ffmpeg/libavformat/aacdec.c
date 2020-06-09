@@ -80,10 +80,31 @@ static int adts_aac_probe(const AVProbeData *p)
         return 0;
 }
 
+static int adts_aac_resync(AVFormatContext *s)
+{
+    uint16_t state;
+
+    // skip data until an ADTS frame is found
+    state = avio_r8(s->pb);
+    while (!avio_feof(s->pb) && avio_tell(s->pb) < s->probesize) {
+        state = (state << 8) | avio_r8(s->pb);
+        if ((state >> 4) != 0xFFF)
+            continue;
+        avio_seek(s->pb, -2, SEEK_CUR);
+        break;
+    }
+    if (s->pb->eof_reached)
+        return AVERROR_EOF;
+    if ((state >> 4) != 0xFFF)
+        return AVERROR_INVALIDDATA;
+
+    return 0;
+}
+
 static int adts_aac_read_header(AVFormatContext *s)
 {
     AVStream *st;
-    uint16_t state;
+    int ret;
 
     st = avformat_new_stream(s, NULL);
     if (!st)
@@ -101,17 +122,9 @@ static int adts_aac_read_header(AVFormatContext *s)
         avio_seek(s->pb, cur, SEEK_SET);
     }
 
-    // skip data until the first ADTS frame is found
-    state = avio_r8(s->pb);
-    while (!avio_feof(s->pb) && avio_tell(s->pb) < s->probesize) {
-        state = (state << 8) | avio_r8(s->pb);
-        if ((state >> 4) != 0xFFF)
-            continue;
-        avio_seek(s->pb, -2, SEEK_CUR);
-        break;
-    }
-    if ((state >> 4) != 0xFFF)
-        return AVERROR_INVALIDDATA;
+    ret = adts_aac_resync(s);
+    if (ret < 0)
+        return ret;
 
     // LCM of all possible ADTS sample rates
     avpriv_set_pts_info(st, 64, 1, 28224000);
@@ -128,13 +141,12 @@ static int handle_id3(AVFormatContext *s, AVPacket *pkt)
 
     ret = av_append_packet(s->pb, pkt, ff_id3v2_tag_len(pkt->data) - pkt->size);
     if (ret < 0) {
-        av_packet_unref(pkt);
         return ret;
     }
 
     ffio_init_context(&ioctx, pkt->data, pkt->size, 0, NULL, NULL, NULL, NULL);
     ff_id3v2_read_dict(&ioctx, &metadata, ID3v2_DEFAULT_MAGIC, &id3v2_extra_meta);
-    if ((ret = ff_id3v2_parse_priv_dict(&metadata, &id3v2_extra_meta)) < 0)
+    if ((ret = ff_id3v2_parse_priv_dict(&metadata, id3v2_extra_meta)) < 0)
         goto error;
 
     if (metadata) {
@@ -161,7 +173,6 @@ retry:
         return ret;
 
     if (ret < ADTS_HEADER_SIZE) {
-        av_packet_unref(pkt);
         return AVERROR(EIO);
     }
 
@@ -172,14 +183,13 @@ retry:
         av_assert2(append > 0);
         ret = av_append_packet(s->pb, pkt, append);
         if (ret != append) {
-            av_packet_unref(pkt);
             return AVERROR(EIO);
         }
         if (!ff_id3v2_match(pkt->data, ID3v2_DEFAULT_MAGIC)) {
             av_packet_unref(pkt);
-            return AVERROR_INVALIDDATA;
-        }
-        ret = handle_id3(s, pkt);
+            ret = adts_aac_resync(s);
+        } else
+            ret = handle_id3(s, pkt);
         if (ret < 0)
             return ret;
 
@@ -188,13 +198,10 @@ retry:
 
     fsize = (AV_RB32(pkt->data + 3) >> 13) & 0x1FFF;
     if (fsize < ADTS_HEADER_SIZE) {
-        av_packet_unref(pkt);
         return AVERROR_INVALIDDATA;
     }
 
     ret = av_append_packet(s->pb, pkt, fsize - pkt->size);
-    if (ret < 0)
-        av_packet_unref(pkt);
 
     return ret;
 }

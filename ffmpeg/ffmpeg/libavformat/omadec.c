@@ -217,14 +217,13 @@ static int decrypt_init(AVFormatContext *s, ID3v2ExtraMeta *em, uint8_t *header)
     av_log(s, AV_LOG_INFO, "File is encrypted\n");
 
     /* find GEOB metadata */
-    while (em) {
-        if (!strcmp(em->tag, "GEOB") &&
-            (geob = em->data) &&
-            (!strcmp(geob->description, "OMG_LSI") ||
-             !strcmp(geob->description, "OMG_BKLSI"))) {
+    for (; em; em = em->next) {
+        if (strcmp(em->tag, "GEOB"))
+            continue;
+        geob = &em->data.geob;
+        if (!strcmp(geob->description, "OMG_LSI") ||
+            !strcmp(geob->description, "OMG_BKLSI"))
             break;
-        }
-        em = em->next;
     }
     if (!em) {
         av_log(s, AV_LOG_ERROR, "No encryption header found\n");
@@ -397,7 +396,7 @@ static int oma_read_header(AVFormatContext *s)
     OMAContext *oc = s->priv_data;
 
     ff_id3v2_read(s, ID3v2_EA3_MAGIC, &extra_meta, 0);
-    if ((ret = ff_id3v2_parse_chapters(s, &extra_meta)) < 0) {
+    if ((ret = ff_id3v2_parse_chapters(s, extra_meta)) < 0) {
         ff_id3v2_free_extra_meta(&extra_meta);
         return ret;
     }
@@ -459,8 +458,8 @@ static int oma_read_header(AVFormatContext *s)
 
         /* fake the ATRAC3 extradata
          * (wav format, makes stream copy to wav work) */
-        if (ff_alloc_extradata(st->codecpar, 14))
-            return AVERROR(ENOMEM);
+        if ((ret = ff_alloc_extradata(st->codecpar, 14)) < 0)
+            return ret;
 
         edata = st->codecpar->extradata;
         AV_WL16(&edata[0],  1);             // always 1

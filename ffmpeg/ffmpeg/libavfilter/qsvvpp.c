@@ -153,6 +153,7 @@ static int map_frame_to_surface(AVFrame *frame, mfxFrameSurface1 *surface)
 {
     switch (frame->format) {
     case AV_PIX_FMT_NV12:
+    case AV_PIX_FMT_P010:
         surface->Data.Y  = frame->data[0];
         surface->Data.UV = frame->data[1];
         break;
@@ -460,6 +461,8 @@ static int init_vpp_session(AVFilterContext *avctx, QSVVPPContext *s)
         out_frames_ctx->height            = FFALIGN(outlink->h, 32);
         out_frames_ctx->sw_format         = s->out_sw_format;
         out_frames_ctx->initial_pool_size = 64;
+        if (avctx->extra_hw_frames > 0)
+            out_frames_ctx->initial_pool_size += avctx->extra_hw_frames;
         out_frames_hwctx->frame_type      = s->out_mem_mode;
 
         ret = av_hwframe_ctx_init(out_frames_ref);

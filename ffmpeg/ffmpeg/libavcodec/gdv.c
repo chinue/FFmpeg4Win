@@ -308,7 +308,7 @@ static int decompress_5(AVCodecContext *avctx, unsigned skip)
             int len;
             int b = bytestream2_get_byte(gb);
             if (b == 0) {
-                break;
+                return 0;
             }
             if (b != 0xFF) {
                 len = b;
@@ -323,6 +323,8 @@ static int decompress_5(AVCodecContext *avctx, unsigned skip)
             lz_copy(pb, g2, off, len);
         }
     }
+    if (bytestream2_get_bytes_left_p(pb) > 0)
+        return AVERROR_INVALIDDATA;
     return 0;
 }
 
@@ -356,7 +358,8 @@ static int decompress_68(AVCodecContext *avctx, unsigned skip, unsigned use8)
                     if (val != ((1 << lbits) - 1)) {
                         break;
                     }
-                    assert(lbits < 16);
+                    if (lbits >= 16)
+                        return AVERROR_INVALIDDATA;
                 }
                 for (i = 0; i < len; i++) {
                     bytestream2_put_byte(pb, bytestream2_get_byte(gb));
@@ -444,6 +447,9 @@ static int decompress_68(AVCodecContext *avctx, unsigned skip, unsigned use8)
             lz_copy(pb, g2, off, len);
         }
     }
+
+    if (bytestream2_get_bytes_left_p(pb) > 0)
+        return AVERROR_INVALIDDATA;
 
     return 0;
 }

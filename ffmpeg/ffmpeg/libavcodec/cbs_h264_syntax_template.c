@@ -137,6 +137,10 @@ static int FUNC(vui_parameters)(CodedBitstreamContext *ctx, RWContext *rw,
             ub(8, colour_primaries);
             ub(8, transfer_characteristics);
             ub(8, matrix_coefficients);
+        } else {
+            infer(colour_primaries,         2);
+            infer(transfer_characteristics, 2);
+            infer(matrix_coefficients,      2);
         }
     } else {
         infer(video_format,             5);
@@ -650,7 +654,7 @@ static int FUNC(sei_pic_timing)(CodedBitstreamContext *ctx, RWContext *rw,
     }
 
     if (sps->vui.pic_struct_present_flag) {
-        static const int num_clock_ts[9] = {
+        static const uint8_t num_clock_ts[9] = {
             1, 1, 1, 2, 2, 3, 3, 2, 3
         };
         int i;
@@ -815,6 +819,19 @@ static int FUNC(sei_mastering_display_colour_volume)(CodedBitstreamContext *ctx,
     return 0;
 }
 
+static int FUNC(sei_alternative_transfer_characteristics)(CodedBitstreamContext *ctx,
+                                                          RWContext *rw,
+                                                          H264RawSEIAlternativeTransferCharacteristics *current)
+{
+    int err;
+
+    HEADER("Alternative Transfer Characteristics");
+
+    ub(8, preferred_transfer_characteristics);
+
+    return 0;
+}
+
 static int FUNC(sei_payload)(CodedBitstreamContext *ctx, RWContext *rw,
                              H264RawSEIPayload *current)
 {
@@ -865,6 +882,10 @@ static int FUNC(sei_payload)(CodedBitstreamContext *ctx, RWContext *rw,
     case H264_SEI_TYPE_MASTERING_DISPLAY_COLOUR_VOLUME:
         CHECK(FUNC(sei_mastering_display_colour_volume)
               (ctx, rw, &current->payload.mastering_display_colour_volume));
+        break;
+    case H264_SEI_TYPE_ALTERNATIVE_TRANSFER:
+        CHECK(FUNC(sei_alternative_transfer_characteristics)
+              (ctx, rw, &current->payload.alternative_transfer_characteristics));
         break;
     default:
         {
@@ -933,6 +954,7 @@ static int FUNC(sei)(CodedBitstreamContext *ctx, RWContext *rw,
         current->payload[k].payload_type = payload_type;
         current->payload[k].payload_size = payload_size;
 
+        current->payload_count++;
         CHECK(FUNC(sei_payload)(ctx, rw, &current->payload[k]));
 
         if (!cbs_h2645_read_more_rbsp_data(rw))
@@ -943,7 +965,6 @@ static int FUNC(sei)(CodedBitstreamContext *ctx, RWContext *rw,
                "SEI message: found %d.\n", k);
         return AVERROR_INVALIDDATA;
     }
-    current->payload_count = k + 1;
 #else
     for (k = 0; k < current->payload_count; k++) {
         PutBitContext start_state;
@@ -1345,7 +1366,7 @@ static int FUNC(slice_header)(CodedBitstreamContext *ctx, RWContext *rw,
                    (sps->pic_height_in_map_units_minus1 + 1);
         max = (pic_size + pps->slice_group_change_rate_minus1) /
               (pps->slice_group_change_rate_minus1 + 1);
-        bits = av_log2(2 * max - 1);
+        bits = av_ceil_log2(max + 1);
 
         u(bits, slice_group_change_cycle, 0, max);
     }
